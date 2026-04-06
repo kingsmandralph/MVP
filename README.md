@@ -94,12 +94,11 @@ The gateway does not own citizen data. It acts as the trusted bridge that valida
 - **Revoke consents** -- Remove an institution's access at any time.
 
 ### Institution Demo Portal (port 5001)
-- **3-Factor Authentication (recommended)** -- Highest assurance flow:
+- **3-Factor Authentication (the only sign-in path)** -- Token-only sign-in is disabled for security; every citizen must complete all three factors:
   1. **Master Token** (something we issue)
   2. **Portal Password** (something the citizen knows)
   3. **OTP delivered to the citizen's SIM** (something the citizen has)
   Each factor is verified through a dedicated FIG API and audited independently.
-- **Token-only sign-in** -- Legacy fast path: citizen pastes their FIG token, instantly validated.
 - **Category-aware KYC with manual fallback** -- When the bank runs `Banking KYC via FIG`, the gateway checks whether the citizen has a record in the *banking* category (BVN). If not, the gateway returns `manual_kyc_required` and the bank automatically routes the citizen into its own internal onboarding form. The citizen will see the matching nudge in their portal next time they sign in.
 - **Consent-based verification** -- Bank requests KYC/age/tax verification by National ID; citizen approves in the Citizen Portal.
 - **Verification history** -- Track all verification requests and their status per session.
@@ -193,23 +192,19 @@ python institution_demo.py
                               portal to register that ID.
 ```
 
-### Three Authentication Methods
+### Authentication: 3-Factor Only
 
-**Method A -- Instant Token Verification (low assurance, fast):**
-1. Citizen copies token from Citizen Portal.
-2. Pastes into institution's portal.
-3. Institution calls `POST /api/v1/credential/validate`.
-4. Citizen authenticated.
+For security, **token-only sign-in is disabled**. Every institution must complete the full 3-factor flow before a citizen is considered authenticated. The `/api/v1/credential/validate` endpoint still exists, but it is consumed *internally* as factor 1 of the 3FA flow — no service can grant access on its result alone.
 
-**Method B -- 3-Factor Authentication (high assurance):**
+**3-Factor Authentication (the only supported sign-in path):**
 1. Citizen submits master token + portal password to the institution.
-2. Institution validates token via `POST /api/v1/credential/validate`.
-3. Institution verifies password via `POST /api/v1/auth/password`.
-4. Institution requests an OTP via `POST /api/v1/auth/otp/request` -- gateway delivers it to the citizen's registered SIM.
-5. Citizen enters the OTP; institution verifies via `POST /api/v1/auth/otp/verify`.
-6. All three factors logged independently in the audit trail.
+2. Institution validates the token via `POST /api/v1/credential/validate` (factor 1 — something we issued).
+3. Institution verifies the password via `POST /api/v1/auth/password` (factor 2 — something the citizen knows).
+4. Institution requests an OTP via `POST /api/v1/auth/otp/request` — gateway delivers it to the citizen's registered SIM.
+5. Citizen enters the OTP; institution verifies it via `POST /api/v1/auth/otp/verify` (factor 3 — something the citizen has).
+6. Each factor is logged independently in the immutable audit trail.
 
-**Method C -- Consent-Based Verification (deep checks):**
+**Consent-Based Verification (separate flow, used *after* sign-in for deep checks):**
 1. Institution submits a verification request via `POST /api/v1/verify`.
 2. Request appears in the citizen's portal as "Pending Consent".
 3. Citizen approves or denies.

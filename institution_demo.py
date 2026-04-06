@@ -98,56 +98,44 @@ LOGIN_PAGE = BASE_CSS + """
     <div class="alert alert-{{ cat }}">{{ msg }}</div>
     {% endfor %}
 
-    <div class="card">
-        <h3>Authenticate with Your Digital Identity</h3>
+    <div class="card" style="border:2px solid #276749;">
+        <h3>Sign In with FIG 3-Factor Authentication</h3>
         <p style="font-size:0.85rem; color:#718096; margin-bottom:1rem;">
-            Welcome to {{ name }}. Instead of filling out KYC paperwork, simply present your
-            FIG Digital Credential to verify your identity instantly.
+            For your security {{ name }} only accepts the FIG 3-factor flow:
+            <strong>Master Token</strong> (something we issued you) +
+            <strong>Portal Password</strong> (something only you know) +
+            <strong>OTP delivered to your registered SIM</strong> (something only you have).
         </p>
 
         <div class="flow-steps">
             <div class="flow-step">
                 <div class="num">1</div>
-                <p><strong>Get your token</strong> from the FIG Citizen Portal</p>
+                <p><strong>Master Token</strong> from FIG Citizen Portal</p>
             </div>
             <div class="flow-step">
                 <div class="num">2</div>
-                <p><strong>Paste it below</strong> or scan your QR code</p>
+                <p><strong>Portal Password</strong> you set at signup</p>
             </div>
             <div class="flow-step">
                 <div class="num">3</div>
-                <p><strong>Instant verification</strong> via the FIG Gateway</p>
+                <p><strong>OTP code</strong> sent to your SIM</p>
             </div>
             <div class="flow-step">
                 <div class="num">4</div>
-                <p><strong>Access services</strong> immediately</p>
+                <p><strong>Access services</strong> -- fully verified</p>
             </div>
         </div>
 
-        <form method="POST" action="/authenticate">
-            <div class="form-group">
-                <label>FIG Credential Token</label>
-                <textarea name="token" rows="4" required placeholder="Paste your FIG credential token here..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-primary">Verify & Sign In</button>
-        </form>
-    </div>
-
-    <div class="card" style="border:2px solid #c05621;">
-        <h3>3-Factor Sign-In (Recommended for High-Value Onboarding)</h3>
-        <p style="font-size:0.85rem; color:#718096; margin-bottom:1rem;">
-            Highest assurance: <strong>Master Token</strong> (FIG-issued) + <strong>Password</strong> (you know) + <strong>OTP from your SIM</strong> (you have).
-        </p>
         <form method="POST" action="/3fa/start">
             <div class="form-group">
-                <label>Master Token</label>
-                <textarea name="token" rows="3" required placeholder="Paste your FIG master token"></textarea>
+                <label>FIG Master Token</label>
+                <textarea name="token" rows="3" required placeholder="Paste your FIG master token here..."></textarea>
             </div>
             <div class="form-group">
                 <label>Portal Password</label>
-                <input type="password" name="password" required>
+                <input type="password" name="password" required placeholder="Your FIG portal password">
             </div>
-            <button type="submit" class="btn btn-primary">Begin 3FA</button>
+            <button type="submit" class="btn btn-primary">Begin 3-Factor Sign-In</button>
         </form>
     </div>
 
@@ -427,36 +415,11 @@ def index():
 
 @app.route('/authenticate', methods=['POST'])
 def authenticate():
-    """Citizen presents their FIG credential token for instant authentication."""
-    token = request.form.get('token', '').strip()
-    if not token:
-        _flash('Please provide your credential token.', 'error')
-        return redirect('/')
-
-    # Call FIG Gateway API to validate the token
-    try:
-        resp = requests.post(
-            f'{FIG_GATEWAY_URL}/api/v1/credential/validate',
-            json={'token': token},
-            timeout=10
-        )
-        data = resp.json()
-    except requests.RequestException as e:
-        _flash(f'Cannot reach FIG Gateway. Is it running on port 5000? Error: {e}', 'error')
-        return redirect('/')
-
-    if data.get('valid'):
-        session['identity'] = {
-            'national_id': data['national_id'],
-            'verified_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-            'token': token
-        }
-        session['verification_history'] = []
-        _flash('Identity verified successfully via FIG Gateway. Welcome!', 'success')
-        return redirect(url_for('dashboard'))
-    else:
-        _flash(f'Credential validation failed: {data.get("reason", "Unknown error")}', 'error')
-        return redirect('/')
+    """Disabled. Token-only sign-in is no longer permitted -- the institution
+    requires the full 3-factor flow (token + password + SIM OTP). This route
+    is kept only to surface a clear message to anything still wired to it."""
+    _flash('Token-only sign-in has been disabled for security. Please use the 3-Factor Sign-In flow.', 'error')
+    return redirect('/')
 
 
 @app.route('/request-verification', methods=['POST'])
