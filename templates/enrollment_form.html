@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Enroll Citizen - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Enroll New Citizen</h1>
+    <a href="{{ url_for('enrollment_list') }}" class="btn btn-outline">Back</a>
+</div>
+
+<div class="card">
+    <h3>Identity Information</h3>
+    <form method="POST">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>National ID *</label>
+                <input type="text" name="national_id" required placeholder="e.g. NID-2026-001">
+            </div>
+            <div class="form-group">
+                <label>First Name *</label>
+                <input type="text" name="first_name" required>
+            </div>
+            <div class="form-group">
+                <label>Last Name *</label>
+                <input type="text" name="last_name" required>
+            </div>
+            <div class="form-group">
+                <label>Date of Birth *</label>
+                <input type="date" name="date_of_birth" required>
+            </div>
+            <div class="form-group">
+                <label>Gender</label>
+                <select name="gender">
+                    <option value="">-- Select --</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Enrollment Channel</label>
+                <select name="enrollment_channel">
+                    <option value="online">Online</option>
+                    <option value="center">Enrollment Center</option>
+                    <option value="agent">Agent Network</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email" placeholder="citizen@example.com">
+            </div>
+            <div class="form-group">
+                <label>Phone</label>
+                <input type="tel" name="phone" placeholder="+234...">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Address</label>
+            <textarea name="address" rows="2" placeholder="Full address"></textarea>
+        </div>
+        <div style="margin-top:1rem">
+            <button type="submit" class="btn btn-primary">Enroll Citizen</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

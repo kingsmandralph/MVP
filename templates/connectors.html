@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Government Connectors - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Government Connectors</h1>
+    <a href="{{ url_for('connector_new') }}" class="btn btn-primary">+ Add Connector</a>
+</div>
+
+{% if connectors %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>System Type</th>
+                    <th>Endpoint</th>
+                    <th>Status</th>
+                    <th>Registered</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for conn in connectors %}
+                <tr>
+                    <td><strong>{{ conn.name }}</strong></td>
+                    <td><span class="badge badge-info">{{ conn.system_type }}</span></td>
+                    <td style="font-size:0.8rem; color:var(--text-muted)">{{ conn.endpoint_url or 'N/A' }}</td>
+                    <td>
+                        {% if conn.status == 'active' %}
+                        <span class="badge badge-success">Active</span>
+                        {% else %}
+                        <span class="badge badge-danger">{{ conn.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ conn.registered_at.strftime('%Y-%m-%d') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="icon">&#8644;</div>
+        <p>No government connectors configured.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

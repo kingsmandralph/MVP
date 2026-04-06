@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Institutions - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Registered Institutions</h1>
+    <a href="{{ url_for('institution_new') }}" class="btn btn-primary">+ Register Institution</a>
+</div>
+
+{% if institutions %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Sector</th>
+                    <th>Status</th>
+                    <th>Verifications</th>
+                    <th>Contact</th>
+                    <th>Registered</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inst in institutions %}
+                <tr>
+                    <td><strong>{{ inst.name }}</strong></td>
+                    <td><span class="badge badge-info">{{ inst.sector }}</span></td>
+                    <td>
+                        {% if inst.status == 'active' %}
+                        <span class="badge badge-success">Active</span>
+                        {% else %}
+                        <span class="badge badge-danger">{{ inst.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ inst.verification_count }}</td>
+                    <td>{{ inst.contact_email or 'N/A' }}</td>
+                    <td>{{ inst.registered_at.strftime('%Y-%m-%d') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="icon">&#9965;</div>
+        <p>No institutions registered yet.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FIG Gateway{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <h2>FIG Gateway</h2>
+            <small>Federated National Digital Identity</small>
+        </div>
+        <nav>
+            <div class="sidebar-section">Overview</div>
+            <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">
+                <span class="icon">&#9632;</span> Dashboard
+            </a>
+
+            <div class="sidebar-section">Identity</div>
+            <a href="{{ url_for('enrollment_list') }}" class="{% if 'enrollment' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#9998;</span> Enrollment
+            </a>
+            <a href="{{ url_for('credential_list') }}" class="{% if 'credential' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#9899;</span> Credentials
+            </a>
+
+            <div class="sidebar-section">Verification</div>
+            <a href="{{ url_for('verification_list') }}" class="{% if 'verification' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#10003;</span> Verifications
+            </a>
+            <a href="{{ url_for('consent_list') }}" class="{% if 'consent' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#9881;</span> Consent
+            </a>
+
+            <div class="sidebar-section">Infrastructure</div>
+            <a href="{{ url_for('institution_list') }}" class="{% if 'institution' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#9965;</span> Institutions
+            </a>
+            <a href="{{ url_for('connector_list') }}" class="{% if 'connector' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#8644;</span> Connectors
+            </a>
+            <a href="{{ url_for('audit_list') }}" class="{% if 'audit' in request.endpoint %}active{% endif %}">
+                <span class="icon">&#9783;</span> Audit Logs
+            </a>
+
+            <div class="sidebar-section">Account</div>
+            <a href="{{ url_for('logout') }}">
+                <span class="icon">&#10140;</span> Logout
+            </a>
+        </nav>
+    </aside>
+
+    <main class="main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+</div>
+</body>
+</html>

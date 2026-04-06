@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Add Connector - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Add Government Connector</h1>
+    <a href="{{ url_for('connector_list') }}" class="btn btn-outline">Back</a>
+</div>
+
+<div class="card">
+    <h3>Connector Details</h3>
+    <form method="POST">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>System Name *</label>
+                <input type="text" name="name" required placeholder="e.g. National Tax Authority">
+            </div>
+            <div class="form-group">
+                <label>System Type *</label>
+                <select name="system_type" required>
+                    <option value="">-- Select --</option>
+                    {% for st in system_types %}
+                    <option value="{{ st }}">{{ st|replace('_', ' ')|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>API Endpoint URL</label>
+                <input type="url" name="endpoint_url" placeholder="https://api.system.gov/v1">
+            </div>
+        </div>
+        <div style="margin-top:1rem">
+            <button type="submit" class="btn btn-primary">Register Connector</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

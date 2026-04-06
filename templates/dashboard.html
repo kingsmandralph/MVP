@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Gateway Dashboard</h1>
+    <span style="font-size:0.85rem; color:var(--text-muted)">Federated National Digital Identity Gateway</span>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="label">Enrolled Citizens</div>
+        <div class="value">{{ stats.total_citizens }}</div>
+    </div>
+    <div class="stat-card success">
+        <div class="label">Verified</div>
+        <div class="value">{{ stats.verified_citizens }}</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="label">Pending Verification</div>
+        <div class="value">{{ stats.pending_citizens }}</div>
+    </div>
+    <div class="stat-card accent">
+        <div class="label">Active Credentials</div>
+        <div class="value">{{ stats.total_credentials }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Institutions</div>
+        <div class="value">{{ stats.total_institutions }}</div>
+    </div>
+    <div class="stat-card accent">
+        <div class="label">Total Verifications</div>
+        <div class="value">{{ stats.total_verifications }}</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="label">Pending Requests</div>
+        <div class="value">{{ stats.pending_verifications }}</div>
+    </div>
+    <div class="stat-card success">
+        <div class="label">Approved</div>
+        <div class="value">{{ stats.approved_verifications }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Active Consents</div>
+        <div class="value">{{ stats.total_consents }}</div>
+    </div>
+    <div class="stat-card accent">
+        <div class="label">Gov Connectors</div>
+        <div class="value">{{ stats.connectors_active }}</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <h3>Sector Breakdown</h3>
+        <div class="sector-bars">
+            {% set max_count = sector_counts.values()|max if sector_counts.values()|list else 1 %}
+            {% for sector, count in sector_counts.items() %}
+            <div class="sector-bar">
+                <span class="name">{{ sector }}</span>
+                <div class="bar">
+                    <div class="fill" style="width: {{ (count / (max_count if max_count > 0 else 1)) * 100 }}%"></div>
+                </div>
+                <span class="count">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Recent Activity</h3>
+        {% if recent_activity %}
+        <ul class="activity-feed">
+            {% for log in recent_activity %}
+            <li>
+                <span>
+                    <span class="badge badge-info">{{ log.event_type }}</span>
+                    {% if log.details %}<span style="margin-left:0.5rem">{{ log.details[:60] }}</span>{% endif %}
+                </span>
+                <span class="time">{{ log.timestamp.strftime('%b %d %H:%M') }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state">
+            <p>No activity yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if recent_verifications %}
+<div class="card">
+    <h3>Recent Verification Requests</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Institution</th>
+                    <th>National ID</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for vr in recent_verifications %}
+                <tr>
+                    <td>#{{ vr.id }}</td>
+                    <td>{{ vr.institution.name if vr.institution else 'N/A' }}</td>
+                    <td>{{ vr.citizen_national_id }}</td>
+                    <td>{{ vr.verification_type }}</td>
+                    <td>
+                        {% if vr.status == 'approved' %}
+                        <span class="badge badge-success">Approved</span>
+                        {% elif vr.status == 'pending' %}
+                        <span class="badge badge-warning">Pending</span>
+                        {% elif vr.status == 'denied' %}
+                        <span class="badge badge-danger">Denied</span>
+                        {% else %}
+                        <span class="badge badge-neutral">{{ vr.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ vr.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

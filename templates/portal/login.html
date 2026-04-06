@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Citizen Portal - FIG Gateway</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="login-container" style="background: linear-gradient(135deg, #276749 0%, #2f855a 100%);">
+    <div class="login-card">
+        <h1>Citizen Portal</h1>
+        <p>Access your digital identity, manage credentials, and control who can verify your data.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('citizen_auth') }}">
+            <div class="form-group">
+                <label>National ID</label>
+                <input type="text" name="national_id" required autofocus placeholder="e.g. NID-2026-001">
+            </div>
+            <button type="submit" class="btn btn-primary" style="background:#276749; width:100%; justify-content:center; padding:0.7rem;">
+                Access My Identity
+            </button>
+        </form>
+
+        <div style="margin-top:1.5rem; text-align:center; font-size:0.8rem; color:var(--text-muted)">
+            <a href="{{ url_for('login') }}" style="color:var(--accent)">Admin Login</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

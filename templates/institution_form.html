@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Register Institution - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Register New Institution</h1>
+    <a href="{{ url_for('institution_list') }}" class="btn btn-outline">Back</a>
+</div>
+
+<div class="card">
+    <h3>Institution Details</h3>
+    <form method="POST">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Institution Name *</label>
+                <input type="text" name="name" required placeholder="e.g. First National Bank">
+            </div>
+            <div class="form-group">
+                <label>Sector *</label>
+                <select name="sector" required>
+                    <option value="">-- Select Sector --</option>
+                    {% for sector in sectors %}
+                    <option value="{{ sector }}">{{ sector|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Contact Email</label>
+                <input type="email" name="contact_email" placeholder="api@institution.com">
+            </div>
+        </div>
+        <div style="margin-top:1rem">
+            <button type="submit" class="btn btn-primary">Register & Generate API Key</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

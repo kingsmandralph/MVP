@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Citizen {{ citizen.national_id }} - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Citizen: {{ citizen.first_name }} {{ citizen.last_name }}</h1>
+    <a href="{{ url_for('enrollment_list') }}" class="btn btn-outline">Back</a>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <h3>Identity Information</h3>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <label>National ID</label>
+                <div class="val">{{ citizen.national_id }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Full Name</label>
+                <div class="val">{{ citizen.first_name }} {{ citizen.last_name }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Date of Birth</label>
+                <div class="val">{{ citizen.date_of_birth.strftime('%Y-%m-%d') }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Gender</label>
+                <div class="val">{{ citizen.gender or 'N/A' }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Email</label>
+                <div class="val">{{ citizen.email or 'N/A' }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Phone</label>
+                <div class="val">{{ citizen.phone or 'N/A' }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Address</label>
+                <div class="val">{{ citizen.address or 'N/A' }}</div>
+            </div>
+            <div class="detail-item">
+                <label>Enrollment Channel</label>
+                <div class="val"><span class="badge badge-neutral">{{ citizen.enrollment_channel }}</span></div>
+            </div>
+            <div class="detail-item">
+                <label>Status</label>
+                <div class="val">
+                    {% if citizen.enrollment_status == 'verified' %}
+                    <span class="badge badge-success">Verified</span>
+                    {% elif citizen.enrollment_status == 'pending' %}
+                    <span class="badge badge-warning">Pending</span>
+                    {% else %}
+                    <span class="badge badge-danger">{{ citizen.enrollment_status }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="detail-item">
+                <label>Enrolled At</label>
+                <div class="val">{{ citizen.enrolled_at.strftime('%Y-%m-%d %H:%M') }}</div>
+            </div>
+        </div>
+        {% if citizen.enrollment_status == 'pending' %}
+        <div style="margin-top:1.5rem">
+            <form method="POST" action="{{ url_for('verify_citizen', citizen_id=citizen.id) }}">
+                <button type="submit" class="btn btn-success">Verify Identity & Issue Credential</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <div>
+        {% if qr_data %}
+        <div class="card">
+            <h3>Digital Credential QR</h3>
+            <div class="qr-container">
+                <img src="data:image/png;base64,{{ qr_data }}" alt="Credential QR Code">
+                <p style="margin-top:0.75rem; font-size:0.8rem; color:var(--text-muted)">
+                    Scan to validate this citizen's digital credential
+                </p>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <h3>Issued Credentials</h3>
+            {% if credentials %}
+            <table>
+                <thead>
+                    <tr><th>Type</th><th>Status</th><th>Issued</th><th>Uses</th></tr>
+                </thead>
+                <tbody>
+                    {% for cred in credentials %}
+                    <tr>
+                        <td>{{ cred.credential_type }}</td>
+                        <td>
+                            {% if cred.status == 'active' %}
+                            <span class="badge badge-success">Active</span>
+                            {% elif cred.status == 'revoked' %}
+                            <span class="badge badge-danger">Revoked</span>
+                            {% else %}
+                            <span class="badge badge-neutral">{{ cred.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ cred.issued_at.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ cred.use_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state"><p>No credentials issued.</p></div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h3>Consent History</h3>
+            {% if consents %}
+            <table>
+                <thead>
+                    <tr><th>Institution</th><th>Scope</th><th>Status</th><th>Date</th></tr>
+                </thead>
+                <tbody>
+                    {% for consent in consents %}
+                    <tr>
+                        <td>{{ consent.institution.name if consent.institution else 'N/A' }}</td>
+                        <td>{{ consent.scope[:40] }}</td>
+                        <td>
+                            {% if consent.granted and not consent.revoked_at %}
+                            <span class="badge badge-success">Active</span>
+                            {% elif consent.revoked_at %}
+                            <span class="badge badge-danger">Revoked</span>
+                            {% else %}
+                            <span class="badge badge-warning">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ consent.granted_at.strftime('%Y-%m-%d') if consent.granted_at else 'N/A' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state"><p>No consent records.</p></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Citizen Enrollment - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Citizen Enrollment</h1>
+    <a href="{{ url_for('enrollment_new') }}" class="btn btn-primary">+ Enroll Citizen</a>
+</div>
+
+{% if citizens %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>National ID</th>
+                    <th>Name</th>
+                    <th>Date of Birth</th>
+                    <th>Channel</th>
+                    <th>Status</th>
+                    <th>Enrolled</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in citizens %}
+                <tr>
+                    <td><a href="{{ url_for('citizen_detail', citizen_id=c.id) }}">{{ c.national_id }}</a></td>
+                    <td>{{ c.first_name }} {{ c.last_name }}</td>
+                    <td>{{ c.date_of_birth.strftime('%Y-%m-%d') }}</td>
+                    <td><span class="badge badge-neutral">{{ c.enrollment_channel }}</span></td>
+                    <td>
+                        {% if c.enrollment_status == 'verified' %}
+                        <span class="badge badge-success">Verified</span>
+                        {% elif c.enrollment_status == 'pending' %}
+                        <span class="badge badge-warning">Pending</span>
+                        {% else %}
+                        <span class="badge badge-danger">{{ c.enrollment_status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ c.enrolled_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        {% if c.enrollment_status == 'pending' %}
+                        <form method="POST" action="{{ url_for('verify_citizen', citizen_id=c.id) }}" style="display:inline">
+                            <button type="submit" class="btn btn-success btn-sm">Verify</button>
+                        </form>
+                        {% endif %}
+                        <a href="{{ url_for('citizen_detail', citizen_id=c.id) }}" class="btn btn-outline btn-sm">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="icon">&#9998;</div>
+        <p>No citizens enrolled yet. Click "Enroll Citizen" to begin.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

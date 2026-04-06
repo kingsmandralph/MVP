@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Consent Management - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Consent Management</h1>
+</div>
+
+{% if records %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Citizen</th>
+                    <th>Institution</th>
+                    <th>Scope</th>
+                    <th>Status</th>
+                    <th>Granted</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>#{{ r.id }}</td>
+                    <td>{{ r.citizen.first_name }} {{ r.citizen.last_name if r.citizen else 'N/A' }}</td>
+                    <td>{{ r.institution.name if r.institution else 'N/A' }}</td>
+                    <td>{{ r.scope[:50] }}</td>
+                    <td>
+                        {% if r.granted and not r.revoked_at %}
+                        <span class="badge badge-success">Active</span>
+                        {% elif r.revoked_at %}
+                        <span class="badge badge-danger">Revoked</span>
+                        {% else %}
+                        <span class="badge badge-warning">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.granted_at.strftime('%Y-%m-%d %H:%M') if r.granted_at else 'N/A' }}</td>
+                    <td>
+                        {% if r.granted and not r.revoked_at %}
+                        <form method="POST" action="{{ url_for('revoke_consent', record_id=r.id) }}" style="display:inline">
+                            <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="icon">&#9881;</div>
+        <p>No consent records yet. Consent is created when citizens approve data sharing.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

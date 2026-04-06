@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Identity - FIG Gateway</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .portal-header {
+            background: linear-gradient(135deg, #276749, #2f855a);
+            color: white;
+            padding: 1.25rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .portal-header h2 { font-size: 1rem; }
+        .portal-header a { color: rgba(255,255,255,0.8); text-decoration: none; font-size: 0.85rem; }
+        .portal-header a:hover { color: white; }
+        .portal-body { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+        .token-box {
+            background: #1a202c;
+            color: #68d391;
+            font-family: monospace;
+            font-size: 0.75rem;
+            padding: 1rem;
+            border-radius: 6px;
+            word-break: break-all;
+            position: relative;
+            margin: 0.75rem 0;
+        }
+        .copy-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: #4a5568;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.3rem 0.6rem;
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+        .copy-btn:hover { background: #718096; }
+        .how-it-works {
+            background: #ebf8ff;
+            border: 1px solid #bee3f8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-top: 1rem;
+        }
+        .how-it-works h4 { color: #2a4365; margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .how-it-works ol { padding-left: 1.25rem; font-size: 0.85rem; color: #4a5568; }
+        .how-it-works li { margin-bottom: 0.35rem; }
+        .request-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background: #fffff0;
+        }
+        .request-card .req-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+<div class="portal-header">
+    <div>
+        <h2>FIG Citizen Portal</h2>
+        <span style="font-size:0.75rem; opacity:0.8">{{ citizen.first_name }} {{ citizen.last_name }} ({{ citizen.national_id }})</span>
+    </div>
+    <a href="{{ url_for('citizen_logout') }}">Sign Out</a>
+</div>
+
+<div class="portal-body">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <!-- Pending Consent Requests -->
+    {% if pending_requests %}
+    <div class="card" style="border-color: #f6e05e; background: #fffff0;">
+        <h3 style="color: #975a16;">Pending Consent Requests</h3>
+        <p style="font-size:0.85rem; color:#744210; margin-bottom:1rem;">
+            These institutions are requesting to verify your identity. Review and approve or deny each request.
+        </p>
+        {% for vr in pending_requests %}
+        <div class="request-card">
+            <div class="req-header">
+                <div>
+                    <strong>{{ vr.institution.name if vr.institution else 'Unknown Institution' }}</strong>
+                    <span class="badge badge-info" style="margin-left:0.5rem">{{ vr.verification_type }}</span>
+                </div>
+                <span style="font-size:0.75rem; color:var(--text-muted)">{{ vr.created_at.strftime('%b %d, %Y %H:%M') }}</span>
+            </div>
+            <p style="font-size:0.85rem; color:#4a5568; margin-bottom:0.75rem;">
+                This institution wants to verify your <strong>{{ vr.verification_type }}</strong>.
+                Only a minimal confirmation will be shared (e.g. "identity valid", "age above 18").
+            </p>
+            <div style="display:flex; gap:0.5rem;">
+                <form method="POST" action="{{ url_for('citizen_approve_consent', req_id=vr.id) }}">
+                    <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('citizen_deny_consent', req_id=vr.id) }}">
+                    <button type="submit" class="btn btn-danger btn-sm">Deny</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="grid-2">
+        <!-- Credential & QR -->
+        <div>
+            <div class="card">
+                <h3>Your Digital Credential</h3>
+                {% if active_token %}
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">
+                    This is your reusable identity token. Present it to any connected institution for instant verification.
+                </p>
+                {% if qr_data %}
+                <div class="qr-container">
+                    <img src="data:image/png;base64,{{ qr_data }}" alt="Credential QR Code">
+                    <p style="margin-top:0.5rem; font-size:0.75rem; color:var(--text-muted)">
+                        Scan this QR at any connected institution
+                    </p>
+                </div>
+                {% endif %}
+
+                <div class="token-box">
+                    <button class="copy-btn" onclick="copyToken()">Copy</button>
+                    <span id="token-text">{{ active_token }}</span>
+                </div>
+
+                <div class="how-it-works">
+                    <h4>How to use your credential</h4>
+                    <ol>
+                        <li><strong>At a bank/telecom/hospital:</strong> Present your QR code or paste your token into their portal.</li>
+                        <li><strong>The institution sends it to FIG Gateway</strong> for validation via API.</li>
+                        <li><strong>Gateway confirms your identity</strong> and returns only minimal data (e.g. "identity valid").</li>
+                        <li><strong>You get instant access</strong> -- no paperwork, no repeated KYC.</li>
+                    </ol>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <p>No active credential. Contact an enrollment center.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Consent & Activity -->
+        <div>
+            <div class="card">
+                <h3>Active Consents</h3>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">
+                    Institutions you have granted access to verify your identity. You can revoke at any time.
+                </p>
+                {% set active_consents = consents|selectattr('granted')|rejectattr('revoked_at')|list %}
+                {% if active_consents %}
+                <table>
+                    <thead><tr><th>Institution</th><th>Scope</th><th>Granted</th><th></th></tr></thead>
+                    <tbody>
+                        {% for c in active_consents %}
+                        <tr>
+                            <td>{{ c.institution.name if c.institution else 'N/A' }}</td>
+                            <td>{{ c.scope }}</td>
+                            <td>{{ c.granted_at.strftime('%b %d, %Y') if c.granted_at else 'N/A' }}</td>
+                            <td>
+                                <form method="POST" action="{{ url_for('citizen_revoke_consent', record_id=c.id) }}">
+                                    <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state" style="padding:1.5rem"><p>No active consents.</p></div>
+                {% endif %}
+            </div>
+
+            <div class="card">
+                <h3>Credential History</h3>
+                {% if credentials %}
+                <table>
+                    <thead><tr><th>Type</th><th>Status</th><th>Issued</th><th>Uses</th></tr></thead>
+                    <tbody>
+                        {% for cred in credentials %}
+                        <tr>
+                            <td>{{ cred.credential_type }}</td>
+                            <td><span class="badge badge-success">Active</span></td>
+                            <td>{{ cred.issued_at.strftime('%b %d, %Y') }}</td>
+                            <td>{{ cred.use_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state" style="padding:1.5rem"><p>No credentials.</p></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyToken() {
+    const text = document.getElementById('token-text').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+}
+</script>
+</body>
+</html>

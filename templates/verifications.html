@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Verifications - FIG Gateway{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Verification Requests</h1>
+</div>
+
+{% if verifications %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Institution</th>
+                    <th>National ID</th>
+                    <th>Type</th>
+                    <th>Consent</th>
+                    <th>Status</th>
+                    <th>Requested</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for vr in verifications %}
+                <tr>
+                    <td>#{{ vr.id }}</td>
+                    <td>{{ vr.institution.name if vr.institution else 'N/A' }}</td>
+                    <td>{{ vr.citizen_national_id }}</td>
+                    <td><span class="badge badge-info">{{ vr.verification_type }}</span></td>
+                    <td>{{ 'Required' if vr.consent_required else 'Not required' }}</td>
+                    <td>
+                        {% if vr.status == 'approved' %}
+                        <span class="badge badge-success">Approved</span>
+                        {% elif vr.status == 'pending' %}
+                        <span class="badge badge-warning">Pending</span>
+                        {% elif vr.status == 'denied' %}
+                        <span class="badge badge-danger">Denied</span>
+                        {% else %}
+                        <span class="badge badge-neutral">{{ vr.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ vr.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        {% if vr.status == 'pending' %}
+                        <form method="POST" action="{{ url_for('approve_verification', req_id=vr.id) }}" style="display:inline">
+                            <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('deny_verification', req_id=vr.id) }}" style="display:inline">
+                            <button type="submit" class="btn btn-danger btn-sm">Deny</button>
+                        </form>
+                        {% elif vr.response_data %}
+                        <span style="font-size:0.75rem; color:var(--text-muted)">{{ vr.response_data[:50] }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="icon">&#10003;</div>
+        <p>No verification requests yet. Institutions submit requests via the API.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
