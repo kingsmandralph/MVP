@@ -107,8 +107,8 @@ The gateway does not own citizen data. It acts as the trusted bridge that valida
 ### Installation
 
 ```bash
-git clone -b claude/build-from-features-5nrwM https://github.com/kingsmandralph/subs.git
-cd subs/MVP
+git clone https://github.com/kingsmandralph/MVP.git
+cd MVP
 
 # Create virtual environment
 python3 -m venv venv
@@ -125,13 +125,11 @@ You need two terminals:
 
 **Terminal 1 -- FIG Gateway (port 5000):**
 ```bash
-cd MVP
 python app.py
 ```
 
 **Terminal 2 -- Demo Institution Portal (port 5001):**
 ```bash
-cd MVP
 python institution_demo.py
 ```
 
@@ -284,33 +282,32 @@ Response (200):
 ## Project Structure
 
 ```
-MVP/
-  app.py                  # Main FIG Gateway application (Flask)
-  config.py               # Application configuration
-  models.py               # Database models (SQLAlchemy)
-  requirements.txt        # Python dependencies
-  institution_demo.py     # Demo institution portal (bank simulator)
-  static/
-    css/
-      style.css           # Gateway UI styles
-  templates/
-    base.html             # Layout template
-    login.html            # Admin login
-    dashboard.html        # Admin dashboard
-    enrollment.html       # Citizen enrollment list
-    enrollment_form.html  # New citizen enrollment form
-    citizen_detail.html   # Citizen detail view with QR
-    credentials.html      # Credential management
-    verifications.html    # Verification request management
-    consent.html          # Consent management
-    institutions.html     # Institution registry
-    institution_form.html # New institution form
-    connectors.html       # Government connector list
-    connector_form.html   # New connector form
-    audit.html            # Audit log viewer
-    portal/
-      login.html          # Citizen portal login
-      dashboard.html      # Citizen self-service dashboard
+app.py                  # Main FIG Gateway application (Flask)
+config.py               # Application configuration
+models.py               # Database models (SQLAlchemy)
+requirements.txt        # Python dependencies
+institution_demo.py     # Demo institution portal (bank simulator)
+static/
+  css/
+    style.css           # Gateway UI styles
+templates/
+  base.html             # Layout template
+  login.html            # Admin login
+  dashboard.html        # Admin dashboard
+  enrollment.html       # Citizen enrollment list
+  enrollment_form.html  # New citizen enrollment form
+  citizen_detail.html   # Citizen detail view with QR
+  credentials.html      # Credential management
+  verifications.html    # Verification request management
+  consent.html          # Consent management
+  institutions.html     # Institution registry
+  institution_form.html # New institution form
+  connectors.html       # Government connector list
+  connector_form.html   # New connector form
+  audit.html            # Audit log viewer
+  portal/
+    login.html          # Citizen portal login
+    dashboard.html      # Citizen self-service dashboard
 ```
 
 ---
