@@ -85,14 +85,23 @@ The gateway does not own citizen data. It acts as the trusted bridge that valida
 - **Audit Logs** -- Immutable, paginated audit trail of all gateway operations with actor, target, IP, and timestamps.
 
 ### Citizen Portal (port 5000/portal)
-- **View credential token and QR code** -- Copy token or scan QR to present to any institution.
-- **Approve/deny verification requests** -- When an institution requests verification, the citizen controls consent.
-- **Revoke consents** -- Remove an institution's access to your verified data at any time.
+- **Self sign-up** -- Citizens create their FIG identity in one form and declare every ID they already hold (NIN, PVC, BVN, NHIS, TIN, driver license, etc.). The gateway federates each declared record from its source authority (NIMC, INEC, CBN, NHIS, FIRS, FRSC, PenCom, MoE).
+- **Master credential token + QR** -- Auto-issued on signup. Reusable across every affiliated institution.
+- **Identity completeness score** -- Dashboard shows what % of the 8 federated identity categories the citizen holds, with a per-category present/missing pill.
+- **Nudges to complete missing IDs** -- For every missing category the citizen sees a prompt like "Take some time to complete your Health Insurance (NHIS) info — Upload to National Health Insurance Scheme", together with the institution sectors that will otherwise force them into manual KYC.
+- **Consent audit trail** -- Every organization that has *ever* requested consent from the citizen is listed with timestamp, type, and resolution (approved / denied / pending).
+- **Approve/deny verification requests** -- Citizen controls consent for every institutional request.
+- **Revoke consents** -- Remove an institution's access at any time.
 
 ### Institution Demo Portal (port 5001)
-- **Token-based authentication** -- Citizen pastes their FIG token; the bank validates it via the Gateway API for instant access.
+- **3-Factor Authentication (recommended)** -- Highest assurance flow:
+  1. **Master Token** (something we issue)
+  2. **Portal Password** (something the citizen knows)
+  3. **OTP delivered to the citizen's SIM** (something the citizen has)
+  Each factor is verified through a dedicated FIG API and audited independently.
+- **Token-only sign-in** -- Legacy fast path: citizen pastes their FIG token, instantly validated.
+- **Category-aware KYC with manual fallback** -- When the bank runs `Banking KYC via FIG`, the gateway checks whether the citizen has a record in the *banking* category (BVN). If not, the gateway returns `manual_kyc_required` and the bank automatically routes the citizen into its own internal onboarding form. The citizen will see the matching nudge in their portal next time they sign in.
 - **Consent-based verification** -- Bank requests KYC/age/tax verification by National ID; citizen approves in the Citizen Portal.
-- **Service access** -- Once authenticated, citizens can access banking services (accounts, loans, insurance, etc.) without paperwork.
 - **Verification history** -- Track all verification requests and their status per session.
 
 ---
@@ -148,46 +157,75 @@ python institution_demo.py
 ### End-to-End Flow
 
 ```
-1. ENROLL        Admin enrolls citizen with identity data
-                 (National ID, name, DOB, biometrics, etc.)
+1. SIGN UP       Citizen self-signs up at /portal/signup, declaring
+                 the IDs they already hold (NIN, PVC, BVN, NHIS, ...)
+                 Gateway federates each one from its source authority
+                 and issues a master credential token.
                            |
                            v
-2. VERIFY        Admin verifies the citizen's identity
-                 Gateway auto-issues a JWT credential + QR code
+2. PRESENT       At a bank/telecom/hospital the citizen begins
+                 3FA: pastes their master token + portal password,
+                 then enters the OTP sent to their SIM.
                            |
                            v
-3. GET TOKEN     Citizen logs into the Citizen Portal
-                 Copies their credential token or scans QR
+3. VALIDATE      Institution calls the FIG 3FA API set:
+                 - POST /api/v1/credential/validate
+                 - POST /api/v1/auth/password
+                 - POST /api/v1/auth/otp/request
+                 - POST /api/v1/auth/otp/verify
                            |
                            v
-4. AUTHENTICATE  Citizen presents token at an institution
-                 (paste into bank portal or scan QR)
+4. CATEGORY      Institution asks FIG for the specific identity it
+                 needs (e.g. banking -> BVN, healthcare -> NHIS):
+                 POST /api/v1/verify/category
                            |
-                           v
-5. VALIDATE      Institution calls FIG Gateway API:
-                 POST /api/v1/credential/validate {token}
-                 Gateway returns: {valid: true, national_id: "..."}
-                           |
-                           v
-6. ACCESS        Citizen gets instant access to services
-                 No paperwork, no repeated KYC
+                +----------+----------+
+                |                     |
+        Record present         Record missing
+                |                     |
+                v                     v
+        Instant verify        manual_kyc_required
+                |                     |
+                v                     v
+        ACCESS GRANTED        FALL BACK to institution's
+                              internal KYC form, and the
+                              citizen is nudged in their
+                              portal to register that ID.
 ```
 
-### Two Authentication Methods
+### Three Authentication Methods
 
-**Method A -- Instant Token Verification:**
+**Method A -- Instant Token Verification (low assurance, fast):**
 1. Citizen copies token from Citizen Portal.
 2. Pastes into institution's portal.
 3. Institution calls `POST /api/v1/credential/validate`.
-4. Gateway confirms validity instantly.
-5. Citizen is authenticated.
+4. Citizen authenticated.
 
-**Method B -- Consent-Based Verification (for deeper checks):**
+**Method B -- 3-Factor Authentication (high assurance):**
+1. Citizen submits master token + portal password to the institution.
+2. Institution validates token via `POST /api/v1/credential/validate`.
+3. Institution verifies password via `POST /api/v1/auth/password`.
+4. Institution requests an OTP via `POST /api/v1/auth/otp/request` -- gateway delivers it to the citizen's registered SIM.
+5. Citizen enters the OTP; institution verifies via `POST /api/v1/auth/otp/verify`.
+6. All three factors logged independently in the audit trail.
+
+**Method C -- Consent-Based Verification (deep checks):**
 1. Institution submits a verification request via `POST /api/v1/verify`.
 2. Request appears in the citizen's portal as "Pending Consent".
 3. Citizen approves or denies.
 4. Institution polls `GET /api/v1/verify/{id}` for the result.
-5. Gateway returns minimal data only (e.g., "identity valid", "age above 18").
+5. Gateway returns minimal data only.
+
+### Category Verification with Manual KYC Fallback
+
+When an institution needs a specific identity (a hospital needs the citizen's NHIS, a bank needs BVN, etc.), it calls:
+
+```
+POST /api/v1/verify/category
+{ "national_id": "NID-2026-002", "category": "health" }
+```
+
+If the citizen has the record, the gateway returns it instantly. If not, it returns `manual_kyc_required: true` together with a `nudge` describing what the citizen should register and where. The institution then routes the citizen into its own internal onboarding flow, and the missing-ID nudge appears on the citizen's dashboard so they can complete it ahead of time next time.
 
 ---
 
@@ -264,6 +302,57 @@ Response (200):
 | `address` | Address confirmation |
 | `employment` | Employment status |
 
+### 3-Factor Authentication APIs
+
+All require the `X-API-Key` header.
+
+```
+POST /api/v1/auth/password
+{ "token": "<master JWT>", "password": "demo1234" }
+-> { "factor": "password", "verified": true, "national_id": "NID-2026-001" }
+
+POST /api/v1/auth/otp/request
+{ "token": "<master JWT>" }
+-> { "sent": true, "channel": "sim", "masked_phone": "0803****67",
+     "expires_in_minutes": 5, "demo_code": "534939" }
+   (demo_code is returned only in the demo build; in production
+    the OTP is delivered exclusively via SMS to the SIM)
+
+POST /api/v1/auth/otp/verify
+{ "token": "<master JWT>", "code": "534939" }
+-> { "factor": "otp", "verified": true, "3fa_complete": true,
+     "national_id": "NID-2026-001" }
+```
+
+### Category Verification (with manual KYC fallback)
+
+```
+POST /api/v1/verify/category
+X-API-Key: <institution_api_key>
+{ "national_id": "NID-2026-002", "category": "health" }
+
+If the citizen has the record:
+{
+  "status": "verified",
+  "manual_kyc_required": false,
+  "category": "health",
+  "source": "NHIS",
+  "record_id": "NHIS-AOK-9091",
+  "verified_at": "..."
+}
+
+If the citizen does NOT have the record:
+{
+  "status": "manual_kyc_required",
+  "manual_kyc_required": true,
+  "category": "health",
+  "reason": "Citizen has no Health Insurance (NHIS) record on file",
+  "nudge": "Citizen should register Health Insurance (NHIS) with National Health Insurance Scheme"
+}
+```
+
+Categories: `foundational` (NIN), `voter` (PVC), `tax` (TIN), `health` (NHIS), `education`, `employment` (PenCom), `banking` (BVN), `driving` (FRSC).
+
 ---
 
 ## Supported Sectors
@@ -306,8 +395,9 @@ templates/
   connector_form.html   # New connector form
   audit.html            # Audit log viewer
   portal/
-    login.html          # Citizen portal login
-    dashboard.html      # Citizen self-service dashboard
+    login.html          # Citizen portal login (national ID + password)
+    signup.html         # Citizen self-signup with declared identities
+    dashboard.html      # Self-service dashboard with completeness, nudges, audit
 ```
 
 ---
@@ -317,9 +407,15 @@ templates/
 | Portal | Username/ID | Password |
 |--------|-------------|----------|
 | Admin Dashboard | `admin` | `admin123` |
-| Citizen Portal | Any verified citizen's National ID | N/A |
+| Citizen Portal — Ada (complete identity) | `NID-2026-001` | `demo1234` |
+| Citizen Portal — Bola (missing health record) | `NID-2026-002` | `demo1234` |
 
-Demo data is seeded on first run: 4 government connectors (National ID, Civil Registry, Tax, Immigration) and 4 institutions (National Bank, TelcoNet, Central Hospital, Ministry of Education).
+Demo data is seeded on first run:
+- 4 government connectors (National ID, Civil Registry, Tax, Immigration)
+- 4 institutions (National Bank, TelcoNet, Central Hospital, Ministry of Education)
+- 2 demo citizens with passwords, master tokens, and federated identity records
+  - **Ada Okafor** holds every category — every institution verifies her instantly
+  - **Bola Adeyemi** is missing his NHIS record — hospitals will route him to manual KYC, and his dashboard shows the nudge to register with NHIS
 
 ---
 
