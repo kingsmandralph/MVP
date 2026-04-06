@@ -34,6 +34,8 @@ INSTITUTION_API_KEY = None  # Set at startup from the gateway DB
 
 INSTITUTION_NAME = 'National Bank of Nigeria'
 INSTITUTION_SECTOR = 'Banking & Financial Services'
+# Identity category this institution requires for KYC. A hospital would set 'health'.
+INSTITUTION_REQUIRED_CATEGORY = 'banking'
 
 
 # ─── HTML Templates ────────────────────────────────────────
@@ -131,6 +133,24 @@ LOGIN_PAGE = BASE_CSS + """
         </form>
     </div>
 
+    <div class="card" style="border:2px solid #c05621;">
+        <h3>3-Factor Sign-In (Recommended for High-Value Onboarding)</h3>
+        <p style="font-size:0.85rem; color:#718096; margin-bottom:1rem;">
+            Highest assurance: <strong>Master Token</strong> (FIG-issued) + <strong>Password</strong> (you know) + <strong>OTP from your SIM</strong> (you have).
+        </p>
+        <form method="POST" action="/3fa/start">
+            <div class="form-group">
+                <label>Master Token</label>
+                <textarea name="token" rows="3" required placeholder="Paste your FIG master token"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Portal Password</label>
+                <input type="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Begin 3FA</button>
+        </form>
+    </div>
+
     <div class="card">
         <h3>Or: Verify by National ID (Requires Your Consent)</h3>
         <p style="font-size:0.85rem; color:#718096; margin-bottom:1rem;">
@@ -187,6 +207,16 @@ AUTHENTICATED_PAGE = BASE_CSS + """
             <tr><td>Credential Valid</td><td><span class="badge badge-success">Yes</span></td></tr>
             <tr><td>Gateway Response</td><td>Identity confirmed via FIG federated verification</td></tr>
         </table>
+    </div>
+
+    <div class="card" style="border:2px solid #c05621;">
+        <h3>Sector KYC Check ({{ ' ' }} category: banking)</h3>
+        <p style="font-size:0.85rem; color:#718096; margin-bottom:0.75rem;">
+            We need to confirm your <strong>banking identity (BVN)</strong> via FIG. If FIG doesn't have it, you'll be routed to our internal manual KYC.
+        </p>
+        <form method="POST" action="/category-verify">
+            <button type="submit" class="btn btn-primary">Run Banking KYC via FIG</button>
+        </form>
     </div>
 
     <div class="card">
@@ -265,6 +295,51 @@ AUTHENTICATED_PAGE = BASE_CSS + """
         </table>
     </div>
     {% endif %}
+</div>
+"""
+
+OTP_PAGE = BASE_CSS + """
+<div class="topbar"><div><h1>{{ name }}</h1><div class="sector">{{ sector }}</div></div></div>
+<div class="container">
+    {% for cat, msg in messages %}<div class="alert alert-{{ cat }}">{{ msg }}</div>{% endfor %}
+    <div class="card">
+        <h3>Step 3 of 3 — Enter OTP from your SIM</h3>
+        <p style="font-size:0.85rem; color:#718096;">
+            Master token verified. Password verified. An OTP has been sent to <strong>{{ masked_phone }}</strong>.
+        </p>
+        {% if demo_code %}
+        <div class="alert alert-warning"><strong>Demo:</strong> code is <code>{{ demo_code }}</code> (in production this would only be on the SIM).</div>
+        {% endif %}
+        <form method="POST" action="/3fa/verify-otp">
+            <div class="form-group"><label>OTP Code</label><input type="text" name="code" required maxlength="6" autofocus></div>
+            <button type="submit" class="btn btn-primary">Complete Sign-In</button>
+        </form>
+    </div>
+</div>
+"""
+
+MANUAL_KYC_PAGE = BASE_CSS + """
+<div class="topbar"><div><h1>{{ name }}</h1><div class="sector">{{ sector }}</div></div><a href="/dashboard">Back</a></div>
+<div class="container">
+    <div class="card" style="border:2px solid #c05621;">
+        <h3>Manual KYC Required</h3>
+        <div class="alert alert-warning">
+            FIG could not verify your <strong>{{ category }}</strong> identity:
+            {{ reason }}
+        </div>
+        <p style="font-size:0.85rem; color:#4a5568;">
+            <strong>{{ nudge }}</strong>
+        </p>
+        <p style="font-size:0.85rem; color:#718096; margin-top:1rem;">
+            Because we don't have this on file, you must complete <strong>{{ name }}'s</strong> internal onboarding form below.
+        </p>
+        <form style="margin-top:1rem;">
+            <div class="form-group"><label>Full Legal Name</label><input type="text" placeholder="As on ID"></div>
+            <div class="form-group"><label>Document Upload (passport/ID)</label><input type="file"></div>
+            <div class="form-group"><label>Proof of Address</label><input type="file"></div>
+            <button type="button" class="btn btn-primary">Submit Manual KYC</button>
+        </form>
+    </div>
 </div>
 """
 
@@ -493,6 +568,106 @@ def additional_verification():
     else:
         _flash(f'Error: {data.get("error", "Unknown")}', 'error')
 
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/3fa/start', methods=['POST'])
+def three_fa_start():
+    """Step 1+2: validate master token, then verify password via FIG API."""
+    token = request.form.get('token', '').strip()
+    password = request.form.get('password', '').strip()
+
+    # Step 1: token validity
+    try:
+        r1 = requests.post(f'{FIG_GATEWAY_URL}/api/v1/credential/validate',
+                           json={'token': token}, timeout=10).json()
+    except requests.RequestException as e:
+        _flash(f'Gateway unreachable: {e}', 'error')
+        return redirect('/')
+    if not r1.get('valid'):
+        _flash(f'Master token invalid: {r1.get("reason", "unknown")}', 'error')
+        return redirect('/')
+
+    # Step 2: password
+    try:
+        r2 = requests.post(f'{FIG_GATEWAY_URL}/api/v1/auth/password',
+                           json={'token': token, 'password': password},
+                           headers={'X-API-Key': INSTITUTION_API_KEY}, timeout=10).json()
+    except requests.RequestException as e:
+        _flash(f'Gateway unreachable: {e}', 'error')
+        return redirect('/')
+    if not r2.get('verified'):
+        _flash(f'Password failed: {r2.get("reason", "denied")}', 'error')
+        return redirect('/')
+
+    # Step 3a: request OTP
+    try:
+        r3 = requests.post(f'{FIG_GATEWAY_URL}/api/v1/auth/otp/request',
+                           json={'token': token},
+                           headers={'X-API-Key': INSTITUTION_API_KEY}, timeout=10).json()
+    except requests.RequestException as e:
+        _flash(f'Gateway unreachable: {e}', 'error')
+        return redirect('/')
+
+    session['3fa_token'] = token
+    session['3fa_national_id'] = r2['national_id']
+    return render_template_string(OTP_PAGE, name=INSTITUTION_NAME,
+                                  sector=INSTITUTION_SECTOR,
+                                  masked_phone=r3.get('masked_phone', 'SIM'),
+                                  demo_code=r3.get('demo_code'),
+                                  messages=session.pop('_messages', []))
+
+
+@app.route('/3fa/verify-otp', methods=['POST'])
+def three_fa_verify_otp():
+    code = request.form.get('code', '').strip()
+    token = session.get('3fa_token')
+    if not token:
+        _flash('3FA session expired. Start again.', 'error')
+        return redirect('/')
+    try:
+        r = requests.post(f'{FIG_GATEWAY_URL}/api/v1/auth/otp/verify',
+                          json={'token': token, 'code': code},
+                          headers={'X-API-Key': INSTITUTION_API_KEY}, timeout=10).json()
+    except requests.RequestException as e:
+        _flash(f'Gateway unreachable: {e}', 'error')
+        return redirect('/')
+    if not r.get('verified'):
+        _flash(f'OTP failed: {r.get("reason", "denied")}', 'error')
+        return redirect('/')
+
+    session['identity'] = {
+        'national_id': r['national_id'],
+        'verified_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        'token': token,
+        'auth_method': '3FA (token + password + SIM OTP)',
+    }
+    session['verification_history'] = []
+    _flash('3FA complete. Welcome — fully verified.', 'success')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/category-verify', methods=['POST'])
+def category_verify():
+    """Try a category-scoped verify; fall back to manual KYC if missing."""
+    if 'identity' not in session:
+        return redirect('/')
+    try:
+        r = requests.post(f'{FIG_GATEWAY_URL}/api/v1/verify/category',
+                          json={'national_id': session['identity']['national_id'],
+                                'category': INSTITUTION_REQUIRED_CATEGORY},
+                          headers={'X-API-Key': INSTITUTION_API_KEY}, timeout=10).json()
+    except requests.RequestException as e:
+        _flash(f'Gateway unreachable: {e}', 'error')
+        return redirect(url_for('dashboard'))
+
+    if r.get('manual_kyc_required'):
+        return render_template_string(MANUAL_KYC_PAGE, name=INSTITUTION_NAME,
+                                      sector=INSTITUTION_SECTOR,
+                                      category=r.get('category', INSTITUTION_REQUIRED_CATEGORY),
+                                      reason=r.get('reason', ''),
+                                      nudge=r.get('nudge', ''))
+    _flash(f"{INSTITUTION_REQUIRED_CATEGORY} verified via FIG (record id: {r.get('record_id')})", 'success')
     return redirect(url_for('dashboard'))
 
 

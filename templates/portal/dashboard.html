@@ -65,6 +65,15 @@
             align-items: center;
             margin-bottom: 0.5rem;
         }
+        .completeness-bar { height: 10px; background:#e2e8f0; border-radius:6px; overflow:hidden; margin:0.5rem 0 1rem; }
+        .completeness-bar > div { height:100%; background:linear-gradient(90deg,#276749,#38a169); }
+        .id-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:0.6rem; }
+        .id-pill { border:1px solid #e2e8f0; border-radius:8px; padding:0.65rem 0.8rem; font-size:0.8rem; }
+        .id-pill.present { background:#f0fff4; border-color:#9ae6b4; }
+        .id-pill.missing { background:#fff5f5; border-color:#feb2b2; }
+        .id-pill .src { color:#718096; font-size:0.7rem; }
+        .nudge { background:#fffbea; border:1px solid #faf089; border-radius:8px; padding:0.85rem 1rem; margin-bottom:0.55rem; font-size:0.85rem; }
+        .nudge strong { color:#975a16; }
     </style>
 </head>
 <body>
@@ -84,6 +93,38 @@
     {% endfor %}
     {% endif %}
     {% endwith %}
+
+    <!-- Identity Completeness -->
+    <div class="card">
+        <h3>Your Identity Completeness — {{ completeness_pct }}%</h3>
+        <div class="completeness-bar"><div style="width: {{ completeness_pct }}%"></div></div>
+        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">
+            FIG federates every identity record you hold. The more you complete, the more institutions can verify you instantly without manual KYC.
+        </p>
+        <div class="id-grid">
+            {% for s in identity_status %}
+            <div class="id-pill {{ 'present' if s.present else 'missing' }}">
+                <div><strong>{{ s.name }}</strong> {% if s.present %}✓{% else %}—{% endif %}</div>
+                <div class="src">{{ s.source }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if missing_nudges %}
+    <div class="card">
+        <h3>Complete Your Profile</h3>
+        {% for n in missing_nudges %}
+        <div class="nudge">
+            <strong>{{ n.message }}</strong> {{ n.cta }}.
+            <div style="font-size:0.75rem; color:#744210; margin-top:0.25rem;">
+                Without this you may be forced into manual KYC at:
+                {{ n.sectors_blocked|join(', ') }} institutions.
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <!-- Pending Consent Requests -->
     {% if pending_requests %}
@@ -210,6 +251,35 @@
                 {% endif %}
             </div>
         </div>
+    </div>
+
+    <!-- Consent Audit Trail -->
+    <div class="card">
+        <h3>Consent Audit Trail</h3>
+        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">
+            Every organization that has ever requested consent from you. You always know who asked, when, what for, and how it was resolved.
+        </p>
+        {% if consent_audit %}
+        <table>
+            <thead><tr><th>When</th><th>Organization</th><th>Type</th><th>Status</th></tr></thead>
+            <tbody>
+                {% for vr in consent_audit %}
+                <tr>
+                    <td style="font-size:0.78rem">{{ vr.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ vr.institution.name if vr.institution else 'Unknown' }}</td>
+                    <td><span class="badge badge-info">{{ vr.verification_type }}</span></td>
+                    <td>
+                        {% if vr.status == 'approved' %}<span class="badge badge-success">Approved</span>
+                        {% elif vr.status == 'pending' %}<span class="badge" style="background:#fefcbf;color:#975a16">Pending</span>
+                        {% else %}<span class="badge badge-danger">{{ vr.status }}</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state" style="padding:1.5rem"><p>No consent requests yet.</p></div>
+        {% endif %}
     </div>
 </div>
 

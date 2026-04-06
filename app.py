@@ -18,7 +18,8 @@ from flask_login import (
 from config import Config
 from models import (
     db, AdminUser, Citizen, Institution, Credential,
-    VerificationRequest, ConsentRecord, AuditLog, GovernmentConnector
+    VerificationRequest, ConsentRecord, AuditLog, GovernmentConnector,
+    IdentityRecord, OTPCode
 )
 
 app = Flask(__name__)
@@ -526,15 +527,119 @@ def citizen_portal():
 
 @app.route('/portal/auth', methods=['POST'])
 def citizen_auth():
-    """Citizen authenticates with National ID to access their portal."""
+    """Citizen authenticates with National ID + password (if set)."""
     national_id = request.form.get('national_id', '').strip()
+    password = request.form.get('password', '').strip()
     citizen = Citizen.query.filter_by(national_id=national_id, enrollment_status='verified').first()
     if not citizen:
         flash('National ID not found or identity not yet verified.', 'error')
         return redirect(url_for('citizen_portal'))
 
+    # If the citizen has a portal password set, require it. (Legacy
+    # admin-enrolled citizens without a password can still log in by ID.)
+    if citizen.password_hash:
+        if not password or not citizen.check_password(password):
+            flash('Invalid password.', 'error')
+            return redirect(url_for('citizen_portal'))
+
     session['citizen_id'] = citizen.id
+    log_audit('citizen_portal_login', 'citizen', citizen.id)
     return redirect(url_for('citizen_dashboard'))
+
+
+# ─── Citizen Self Sign-Up ──────────────────────────────────
+
+def _import_identities_from_sources(citizen, declared):
+    """Mock-import identity records from affiliated authorities.
+
+    In a real deployment this would call out to NIMC, INEC, FIRS, NHIS, etc.
+    For the demo we accept whatever the citizen declares as already-issued
+    record IDs and persist them as IdentityRecords.
+    """
+    created = []
+    for category, cfg in Config.IDENTITY_CATEGORIES.items():
+        record_id = (declared.get(category) or '').strip()
+        if not record_id:
+            continue
+        rec = IdentityRecord(
+            citizen_id=citizen.id,
+            category=category,
+            source=cfg['source'],
+            record_id=record_id,
+            record_data=json.dumps({
+                'holder': f'{citizen.first_name} {citizen.last_name}',
+                'category': category,
+                'authority': cfg['affiliated_org'],
+            }),
+            verified=True,
+            issued_at=datetime.now(timezone.utc),
+        )
+        db.session.add(rec)
+        created.append(category)
+    return created
+
+
+@app.route('/portal/signup', methods=['GET', 'POST'])
+def citizen_signup():
+    """Self-service signup. Citizen declares which identities they already have
+    (NIN, PVC, BVN, ...) and the gateway imports them from affiliated sources."""
+    if request.method == 'POST':
+        national_id = request.form.get('national_id', '').strip()
+        password = request.form.get('password', '')
+        if not national_id or len(password) < 6:
+            flash('National ID and a password (min 6 chars) are required.', 'error')
+            return redirect(url_for('citizen_signup'))
+        if Citizen.query.filter_by(national_id=national_id).first():
+            flash('A citizen with this National ID already exists. Please sign in.', 'error')
+            return redirect(url_for('citizen_portal'))
+
+        try:
+            dob = datetime.strptime(request.form['date_of_birth'], '%Y-%m-%d').date()
+        except (KeyError, ValueError):
+            flash('Valid date of birth is required.', 'error')
+            return redirect(url_for('citizen_signup'))
+
+        citizen = Citizen(
+            national_id=national_id,
+            first_name=request.form.get('first_name', '').strip(),
+            last_name=request.form.get('last_name', '').strip(),
+            date_of_birth=dob,
+            gender=request.form.get('gender', ''),
+            email=request.form.get('email', '').strip(),
+            phone=request.form.get('phone', '').strip(),
+            address=request.form.get('address', '').strip(),
+            enrollment_channel='self_signup',
+            enrollment_status='verified',  # auto-verified once foundational ID present
+            verified_at=datetime.now(timezone.utc),
+            biometric_hash=secrets.token_hex(32),
+        )
+        citizen.set_password(password)
+        db.session.add(citizen)
+        db.session.flush()  # need citizen.id for FK
+
+        # Import any identity records the citizen declares -- these would
+        # normally be pulled from NIMC/INEC/FIRS/NHIS via federated connectors.
+        declared = {cat: request.form.get(f'id_{cat}', '') for cat in Config.IDENTITY_CATEGORIES}
+        imported = _import_identities_from_sources(citizen, declared)
+
+        # Auto-issue master credential token
+        token = generate_credential_token(citizen)
+        cred = Credential(
+            citizen_id=citizen.id,
+            token=token,
+            credential_type='master',
+            expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+        )
+        db.session.add(cred)
+        db.session.commit()
+        log_audit('citizen_self_signup', 'citizen', citizen.id,
+                  details=f'Imported categories: {", ".join(imported) or "none"}')
+
+        session['citizen_id'] = citizen.id
+        flash(f'Welcome {citizen.first_name}. Your master token has been issued.', 'success')
+        return redirect(url_for('citizen_dashboard'))
+
+    return render_template('portal/signup.html', categories=Config.IDENTITY_CATEGORIES)
 
 
 @app.route('/portal/dashboard')
@@ -555,7 +660,36 @@ def citizen_dashboard():
         citizen_national_id=citizen.national_id, status='pending', consent_required=True
     ).all()
 
-    # Generate QR for active credential
+    # Identity completeness scoring + nudges
+    held_categories = {r.category for r in
+                       IdentityRecord.query.filter_by(citizen_id=citizen.id).all()}
+    all_categories = Config.IDENTITY_CATEGORIES
+    identity_status = []
+    missing_nudges = []
+    for cat, cfg in all_categories.items():
+        present = cat in held_categories
+        identity_status.append({
+            'category': cat,
+            'name': cfg['name'],
+            'source': cfg['source'],
+            'present': present,
+            'affiliated_org': cfg['affiliated_org'],
+        })
+        if not present:
+            missing_nudges.append({
+                'category': cat,
+                'message': f"Take some time to complete your {cfg['name']} info.",
+                'cta': f"Upload to {cfg['affiliated_org']}",
+                'sectors_blocked': cfg['required_sectors'],
+            })
+    completeness_pct = int(round(100 * len(held_categories) / max(1, len(all_categories))))
+
+    # Full consent audit trail (all orgs that ever requested consent from this citizen)
+    consent_audit = VerificationRequest.query.filter_by(
+        citizen_national_id=citizen.national_id
+    ).order_by(VerificationRequest.created_at.desc()).all()
+
+    # Generate QR for master credential
     qr_data = None
     active_token = None
     if credentials:
@@ -565,7 +699,11 @@ def citizen_dashboard():
     return render_template('portal/dashboard.html', citizen=citizen,
                            credentials=credentials, consents=consents,
                            pending_requests=pending_requests,
-                           qr_data=qr_data, active_token=active_token)
+                           qr_data=qr_data, active_token=active_token,
+                           identity_status=identity_status,
+                           missing_nudges=missing_nudges,
+                           completeness_pct=completeness_pct,
+                           consent_audit=consent_audit)
 
 
 @app.route('/portal/consent/approve/<int:req_id>', methods=['POST'])
@@ -669,6 +807,164 @@ def citizen_logout():
     return redirect(url_for('citizen_portal'))
 
 
+# ─── 3-Factor Auth API (token + password + OTP) ──────────
+# Used by institutions to authenticate a citizen with three factors:
+#   1. Master credential token  -- something we issue
+#   2. Citizen password         -- something the citizen knows
+#   3. OTP delivered to SIM     -- something the citizen has
+
+def _resolve_citizen_from_token(token):
+    """Decode a master token and return the live Citizen record, or None."""
+    try:
+        payload = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+    except jwt.PyJWTError:
+        return None
+    cred = Credential.query.filter_by(token=token, status='active').first()
+    if not cred:
+        return None
+    return Citizen.query.filter_by(national_id=payload.get('sub')).first()
+
+
+def _institution_from_request():
+    api_key = request.headers.get('X-API-Key')
+    if not api_key:
+        return None
+    return Institution.query.filter_by(api_key=api_key, status='active').first()
+
+
+@app.route('/api/v1/auth/password', methods=['POST'])
+def api_auth_password():
+    """Factor 2: verify the citizen's portal password against a master token."""
+    inst = _institution_from_request()
+    if not inst:
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+    data = request.get_json() or {}
+    token = data.get('token', '')
+    password = data.get('password', '')
+    citizen = _resolve_citizen_from_token(token)
+    if not citizen:
+        return jsonify({'factor': 'password', 'verified': False,
+                        'reason': 'Invalid master token'}), 200
+    if not citizen.check_password(password):
+        log_audit('3fa_password_failed', 'institution', inst.id,
+                  'citizen', citizen.id)
+        return jsonify({'factor': 'password', 'verified': False,
+                        'reason': 'Password mismatch'}), 200
+    log_audit('3fa_password_ok', 'institution', inst.id, 'citizen', citizen.id)
+    return jsonify({'factor': 'password', 'verified': True,
+                    'national_id': citizen.national_id}), 200
+
+
+@app.route('/api/v1/auth/otp/request', methods=['POST'])
+def api_auth_otp_request():
+    """Factor 3 (step a): generate an OTP, 'send it to the citizen's SIM'.
+
+    For the demo we just persist it and return it in the response so the
+    institution demo can display it. In production this would push to an
+    SMS gateway and the response would NOT include the code.
+    """
+    inst = _institution_from_request()
+    if not inst:
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+    data = request.get_json() or {}
+    citizen = _resolve_citizen_from_token(data.get('token', ''))
+    if not citizen:
+        return jsonify({'error': 'Invalid master token'}), 400
+    code = ''.join(secrets.choice('0123456789') for _ in range(6))
+    otp = OTPCode(
+        citizen_id=citizen.id,
+        code=code,
+        purpose=f'institution_auth:{inst.id}',
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=app.config.get('OTP_EXPIRY_MINUTES', 5)),
+    )
+    db.session.add(otp)
+    db.session.commit()
+    log_audit('3fa_otp_sent', 'institution', inst.id, 'citizen', citizen.id,
+              f'OTP delivered to {citizen.phone or "registered SIM"}')
+    return jsonify({
+        'sent': True,
+        'channel': 'sim',
+        'masked_phone': (citizen.phone[:4] + '****' + citizen.phone[-2:]) if citizen.phone else 'SIM',
+        'expires_in_minutes': app.config.get('OTP_EXPIRY_MINUTES', 5),
+        'demo_code': code,  # demo only -- remove in production
+    }), 200
+
+
+@app.route('/api/v1/auth/otp/verify', methods=['POST'])
+def api_auth_otp_verify():
+    """Factor 3 (step b): verify a SIM OTP."""
+    inst = _institution_from_request()
+    if not inst:
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+    data = request.get_json() or {}
+    citizen = _resolve_citizen_from_token(data.get('token', ''))
+    code = (data.get('code') or '').strip()
+    if not citizen or not code:
+        return jsonify({'factor': 'otp', 'verified': False,
+                        'reason': 'Missing token or code'}), 200
+    otp = OTPCode.query.filter_by(
+        citizen_id=citizen.id, code=code, used=False,
+        purpose=f'institution_auth:{inst.id}'
+    ).order_by(OTPCode.id.desc()).first()
+    now = datetime.now(timezone.utc)
+    if not otp or otp.expires_at.replace(tzinfo=timezone.utc) < now:
+        log_audit('3fa_otp_failed', 'institution', inst.id, 'citizen', citizen.id)
+        return jsonify({'factor': 'otp', 'verified': False,
+                        'reason': 'Invalid or expired OTP'}), 200
+    otp.used = True
+    db.session.commit()
+    log_audit('3fa_otp_ok', 'institution', inst.id, 'citizen', citizen.id)
+    return jsonify({'factor': 'otp', 'verified': True,
+                    'national_id': citizen.national_id,
+                    '3fa_complete': True}), 200
+
+
+@app.route('/api/v1/verify/category', methods=['POST'])
+def api_verify_category():
+    """Category-aware verification.
+
+    The institution declares which identity category it needs (e.g. 'health'
+    for a hospital, 'banking' for a bank). If the citizen does not have a
+    record in that category, the gateway returns `manual_kyc_required` so
+    the institution falls back to its own onboarding flow -- and the citizen
+    sees a nudge in their portal to complete that identity next time.
+    """
+    inst = _institution_from_request()
+    if not inst:
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+    data = request.get_json() or {}
+    national_id = data.get('national_id', '')
+    category = data.get('category', '')
+    if category not in Config.IDENTITY_CATEGORIES:
+        return jsonify({'error': f'Unknown category. Use one of: {list(Config.IDENTITY_CATEGORIES)}'}), 400
+    citizen = Citizen.query.filter_by(national_id=national_id).first()
+    if not citizen or citizen.enrollment_status != 'verified':
+        return jsonify({'status': 'unknown_citizen',
+                        'manual_kyc_required': True,
+                        'reason': 'Citizen is not registered with FIG'}), 200
+
+    record = IdentityRecord.query.filter_by(citizen_id=citizen.id, category=category).first()
+    cat_cfg = Config.IDENTITY_CATEGORIES[category]
+    log_audit('category_verify', 'institution', inst.id,
+              'citizen', citizen.id, f'category={category} found={bool(record)}')
+    if not record:
+        return jsonify({
+            'status': 'manual_kyc_required',
+            'manual_kyc_required': True,
+            'category': category,
+            'reason': f'Citizen has no {cat_cfg["name"]} record on file',
+            'nudge': f'Citizen should register {cat_cfg["name"]} with {cat_cfg["affiliated_org"]}',
+        }), 200
+    return jsonify({
+        'status': 'verified',
+        'manual_kyc_required': False,
+        'category': category,
+        'source': cat_cfg['source'],
+        'record_id': record.record_id,
+        'verified_at': datetime.now(timezone.utc).isoformat(),
+    }), 200
+
+
 # ─── Database Initialization ──────────────────────────────
 
 def init_db():
@@ -709,6 +1005,67 @@ def init_db():
             for inst in demo_institutions:
                 db.session.add(inst)
 
+            db.session.commit()
+
+            # Seed demo citizens with passwords + identity records
+            demo_citizens = [
+                {
+                    'national_id': 'NID-2026-001',
+                    'first_name': 'Ada', 'last_name': 'Okafor',
+                    'date_of_birth': date(1995, 4, 12),
+                    'gender': 'F', 'phone': '08031234567', 'email': 'ada@example.ng',
+                    'password': 'demo1234',
+                    'records': {  # citizen who has everything
+                        'foundational': 'NIN-11122233344',
+                        'voter': 'PVC-AOK001',
+                        'tax': 'TIN-5566778',
+                        'health': 'NHIS-AOK-9091',
+                        'banking': 'BVN-22113344556',
+                        'driving': 'FRSC-AOK-2023',
+                    },
+                },
+                {
+                    'national_id': 'NID-2026-002',
+                    'first_name': 'Bola', 'last_name': 'Adeyemi',
+                    'date_of_birth': date(1990, 9, 3),
+                    'gender': 'M', 'phone': '08099887766', 'email': 'bola@example.ng',
+                    'password': 'demo1234',
+                    'records': {  # citizen MISSING health -> forced manual KYC at hospital
+                        'foundational': 'NIN-99988877766',
+                        'voter': 'PVC-BAD002',
+                        'banking': 'BVN-77665544332',
+                    },
+                },
+            ]
+            for spec in demo_citizens:
+                c = Citizen(
+                    national_id=spec['national_id'],
+                    first_name=spec['first_name'], last_name=spec['last_name'],
+                    date_of_birth=spec['date_of_birth'], gender=spec['gender'],
+                    phone=spec['phone'], email=spec['email'],
+                    enrollment_channel='self_signup',
+                    enrollment_status='verified',
+                    verified_at=datetime.now(timezone.utc),
+                    biometric_hash=secrets.token_hex(32),
+                )
+                c.set_password(spec['password'])
+                db.session.add(c)
+                db.session.flush()
+                for cat, rid in spec['records'].items():
+                    cfg = Config.IDENTITY_CATEGORIES[cat]
+                    db.session.add(IdentityRecord(
+                        citizen_id=c.id, category=cat, source=cfg['source'],
+                        record_id=rid,
+                        record_data=json.dumps({'holder': f'{c.first_name} {c.last_name}'}),
+                        verified=True,
+                        issued_at=datetime.now(timezone.utc),
+                    ))
+                # Issue master credential token
+                token = generate_credential_token(c)
+                db.session.add(Credential(
+                    citizen_id=c.id, token=token, credential_type='master',
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+                ))
             db.session.commit()
             log_audit('system_initialized', 'system', None, details='Database initialized with demo data')
 

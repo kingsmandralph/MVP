@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - FIG Citizen Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .signup-wrap { max-width: 720px; margin: 2rem auto; padding: 0 1.5rem; }
+        .signup-wrap h1 { color: #276749; margin-bottom: 0.25rem; }
+        .signup-wrap p.lede { color: #4a5568; font-size: 0.9rem; margin-bottom: 1.5rem; }
+        .ids-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .ids-grid .form-group { margin-bottom: 0.5rem; }
+        .help { font-size: 0.75rem; color: #718096; margin-top: 0.25rem; }
+        fieldset { border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+        legend { padding: 0 0.5rem; font-size: 0.8rem; color: #276749; font-weight: 600; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+<div class="signup-wrap">
+    <h1>Create Your FIG Identity</h1>
+    <p class="lede">Sign up once. We'll federate every identity you already hold (NIN, PVC, BVN, NHIS...) so any affiliated institution can verify you instantly.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('citizen_signup') }}" class="card">
+        <fieldset>
+            <legend>Personal</legend>
+            <div class="ids-grid">
+                <div class="form-group"><label>National ID *</label><input type="text" name="national_id" required placeholder="NID-2026-XXX"></div>
+                <div class="form-group"><label>Date of Birth *</label><input type="date" name="date_of_birth" required></div>
+                <div class="form-group"><label>First Name</label><input type="text" name="first_name" required></div>
+                <div class="form-group"><label>Last Name</label><input type="text" name="last_name" required></div>
+                <div class="form-group"><label>Gender</label><select name="gender"><option>F</option><option>M</option><option>Other</option></select></div>
+                <div class="form-group"><label>Phone (SIM for OTP) *</label><input type="text" name="phone" required placeholder="0803..."></div>
+                <div class="form-group"><label>Email</label><input type="email" name="email"></div>
+                <div class="form-group"><label>Portal Password *</label><input type="password" name="password" required minlength="6"></div>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Declare your existing identities</legend>
+            <p class="help" style="margin-bottom:0.75rem">Enter the IDs you already hold. The gateway will pull each record from its source authority. Leave blank for any you don't have -- you'll be nudged to register them later.</p>
+            <div class="ids-grid">
+                {% for cat, cfg in categories.items() %}
+                <div class="form-group">
+                    <label>{{ cfg.name }}</label>
+                    <input type="text" name="id_{{ cat }}" placeholder="{{ cfg.source }} record id">
+                    <div class="help">Source: {{ cfg.affiliated_org }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </fieldset>
+
+        <button type="submit" class="btn btn-primary" style="background:#276749;">Create My FIG Identity</button>
+        <a href="{{ url_for('citizen_portal') }}" class="btn btn-outline" style="margin-left:0.5rem;">Already signed up? Sign in</a>
+    </form>
+</div>
+</body>
+</html>

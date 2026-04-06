@@ -35,13 +35,23 @@ class Citizen(db.Model):
     phone = db.Column(db.String(20))
     address = db.Column(db.Text)
     biometric_hash = db.Column(db.String(256))
+    password_hash = db.Column(db.String(128))  # for citizen self-service portal & 3FA
     enrollment_status = db.Column(db.String(20), default='pending')  # pending, verified, suspended
-    enrollment_channel = db.Column(db.String(20), default='online')  # online, center, agent
+    enrollment_channel = db.Column(db.String(20), default='online')  # online, center, agent, self_signup
     enrolled_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     verified_at = db.Column(db.DateTime)
 
     credentials = db.relationship('Credential', backref='citizen', lazy=True)
     consents = db.relationship('ConsentRecord', backref='citizen', lazy=True)
+    identity_records = db.relationship('IdentityRecord', backref='citizen', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    def check_password(self, password):
+        if not self.password_hash:
+            return False
+        return bcrypt.checkpw(password.encode(), self.password_hash.encode())
 
 
 class Institution(db.Model):
@@ -116,6 +126,37 @@ class AuditLog(db.Model):
     details = db.Column(db.Text)
     ip_address = db.Column(db.String(45))
     timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class IdentityRecord(db.Model):
+    """A specific identity attribute imported from a government/affiliated source.
+
+    e.g. National ID (NIN) from NIMC, Voter Card (PVC) from INEC,
+    Health insurance from NHIS, etc. Used for identity completeness scoring
+    and to determine whether a category-specific verification can be served.
+    """
+    __tablename__ = 'identity_records'
+    id = db.Column(db.Integer, primary_key=True)
+    citizen_id = db.Column(db.Integer, db.ForeignKey('citizens.id'), nullable=False)
+    category = db.Column(db.String(40), nullable=False)  # foundational, voter, tax, health, education, employment, banking, driving
+    source = db.Column(db.String(80), nullable=False)    # NIMC, INEC, FIRS, NHIS, ...
+    record_id = db.Column(db.String(80))                  # external record id (e.g. NIN number)
+    record_data = db.Column(db.Text)                      # JSON of attributes
+    verified = db.Column(db.Boolean, default=True)
+    issued_at = db.Column(db.DateTime)
+    imported_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class OTPCode(db.Model):
+    """One-time codes sent to a citizen's SIM for the 3FA 'something you have' factor."""
+    __tablename__ = 'otp_codes'
+    id = db.Column(db.Integer, primary_key=True)
+    citizen_id = db.Column(db.Integer, db.ForeignKey('citizens.id'), nullable=False)
+    code = db.Column(db.String(10), nullable=False)
+    purpose = db.Column(db.String(40), default='institution_auth')
+    used = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = db.Column(db.DateTime, nullable=False)
 
 
 class GovernmentConnector(db.Model):
