@@ -975,6 +975,75 @@ def api_verify_category():
     }), 200
 
 
+@app.route('/api/v1/identity/manual-register', methods=['POST'])
+def api_identity_manual_register():
+    """Register a citizen's missing identity category as filled, on the
+    strength of a manual KYC document collected by an institution.
+
+    The institution has already accepted the upload on its side; FIG just
+    records that the gap is closed so every other affiliated institution
+    will see the citizen as complete for that category from now on.
+    """
+    inst = _institution_from_request()
+    if not inst:
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+    data = request.get_json() or {}
+    national_id = (data.get('national_id') or '').strip()
+    category = (data.get('category') or '').strip()
+    proof_ref = (data.get('manual_proof_ref') or '').strip()
+    holder_name = (data.get('holder_name') or '').strip()
+
+    if category not in Config.IDENTITY_CATEGORIES:
+        return jsonify({'error': f'Unknown category. Use one of: {list(Config.IDENTITY_CATEGORIES)}'}), 400
+    if not proof_ref:
+        return jsonify({'error': 'manual_proof_ref is required'}), 400
+
+    citizen = Citizen.query.filter_by(national_id=national_id).first()
+    if not citizen:
+        return jsonify({'error': 'Citizen not found'}), 404
+
+    cat_cfg = Config.IDENTITY_CATEGORIES[category]
+    existing = IdentityRecord.query.filter_by(citizen_id=citizen.id, category=category).first()
+    if existing:
+        return jsonify({
+            'registered': True,
+            'already_present': True,
+            'category': category,
+            'source': existing.source,
+            'record_id': existing.record_id,
+        }), 200
+
+    record = IdentityRecord(
+        citizen_id=citizen.id,
+        category=category,
+        source=f'Manual KYC via {inst.name}',
+        record_id=proof_ref,
+        record_data=json.dumps({
+            'holder': holder_name or f'{citizen.first_name} {citizen.last_name}',
+            'collected_by': inst.name,
+            'manual_proof_ref': proof_ref,
+            'expected_authority': cat_cfg['affiliated_org'],
+            'collected_at': datetime.now(timezone.utc).isoformat(),
+        }),
+        verified=True,
+        issued_at=datetime.now(timezone.utc),
+    )
+    db.session.add(record)
+    db.session.commit()
+    log_audit('manual_kyc_registered', 'institution', inst.id,
+              'citizen', citizen.id,
+              f'category={category} proof={proof_ref}')
+
+    return jsonify({
+        'registered': True,
+        'already_present': False,
+        'category': category,
+        'source': record.source,
+        'record_id': record.record_id,
+        'message': f'{cat_cfg["name"]} now marked as complete on this citizen\'s FIG profile.',
+    }), 200
+
+
 # ─── Database Initialization ──────────────────────────────
 
 def init_db():

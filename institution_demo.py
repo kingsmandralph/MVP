@@ -18,12 +18,12 @@ Run: python institution_demo.py
 """
 
 import json
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
 import requests
 from flask import Flask, render_template_string, request, redirect, session, flash, url_for
-
-from datetime import timedelta
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = 'demo-institution-secret-key'
@@ -341,6 +341,7 @@ OTP_PAGE = BASE_CSS + """
 MANUAL_KYC_PAGE = BASE_CSS + """
 <div class="topbar"><div><h1>{{ name }}</h1><div class="sector">{{ sector }}</div></div><a href="/dashboard">Back</a></div>
 <div class="container">
+    {% for cat, msg in messages %}<div class="alert alert-{{ cat }}">{{ msg }}</div>{% endfor %}
     <div class="card" style="border:2px solid #c05621;">
         <h3>Manual KYC Required</h3>
         <div class="alert alert-warning">
@@ -351,14 +352,41 @@ MANUAL_KYC_PAGE = BASE_CSS + """
             <strong>{{ nudge }}</strong>
         </p>
         <p style="font-size:0.85rem; color:#718096; margin-top:1rem;">
-            Because we don't have this on file, you must complete <strong>{{ name }}'s</strong> internal onboarding form below.
+            Because we don't have this on file, please upload <em>any</em> supporting document
+            (ID card, utility bill, photo, PDF -- anything works in this demo).
+            On submit, {{ name }} will accept the file as proof and register the
+            <strong>{{ category }}</strong> category as filled on your FIG profile, so no
+            other institution will ever have to ask you for it again.
         </p>
-        <form style="margin-top:1rem;">
-            <div class="form-group"><label>Full Legal Name</label><input type="text" placeholder="As on ID"></div>
-            <div class="form-group"><label>Document Upload (passport/ID)</label><input type="file"></div>
-            <div class="form-group"><label>Proof of Address</label><input type="file"></div>
-            <button type="button" class="btn btn-primary">Submit Manual KYC</button>
+        <form method="POST" action="/manual-kyc-submit" enctype="multipart/form-data" style="margin-top:1rem;">
+            <input type="hidden" name="category" value="{{ category }}">
+            <div class="form-group"><label>Full Legal Name</label><input type="text" name="full_name" placeholder="As on ID"></div>
+            <div class="form-group">
+                <label>Supporting Document (any file type)</label>
+                <input type="file" name="document" required>
+                <div style="font-size:0.7rem;color:#718096;margin-top:0.25rem;">Accepts any file: PDF, JPG, PNG, DOCX, etc.</div>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit Manual KYC</button>
         </form>
+    </div>
+</div>
+"""
+
+MANUAL_KYC_SUCCESS_PAGE = BASE_CSS + """
+<div class="topbar"><div><h1>{{ name }}</h1><div class="sector">{{ sector }}</div></div><a href="/dashboard">Back to Dashboard</a></div>
+<div class="container">
+    <div class="card" style="border:2px solid #276749;">
+        <h3>Manual KYC Accepted</h3>
+        <div class="alert alert-success">
+            We received your file <code>{{ filename }}</code> ({{ size }} bytes) and accepted it as proof of <strong>{{ category }}</strong>.
+        </div>
+        <p style="font-size:0.85rem; color:#4a5568;">
+            Your FIG profile has been updated -- the <strong>{{ category }}</strong> category is now marked complete and any other institution that needs it will see it instantly.
+        </p>
+        <p style="font-size:0.85rem; color:#718096; margin-top:1rem;">
+            Reference: <code>{{ proof_ref }}</code>
+        </p>
+        <a href="/dashboard" class="btn btn-primary">Continue to {{ name }}</a>
     </div>
 </div>
 """
@@ -689,9 +717,65 @@ def category_verify():
                                       sector=INSTITUTION_SECTOR,
                                       category=r.get('category', INSTITUTION_REQUIRED_CATEGORY),
                                       reason=r.get('reason', ''),
-                                      nudge=r.get('nudge', ''))
+                                      nudge=r.get('nudge', ''),
+                                      messages=session.pop('_messages', []))
     _flash(f"{INSTITUTION_REQUIRED_CATEGORY} verified via FIG (record id: {r.get('record_id')})", 'success')
     return redirect(url_for('dashboard'))
+
+
+@app.route('/manual-kyc-submit', methods=['POST'])
+def manual_kyc_submit():
+    """Accept any file as manual KYC proof, save it locally, and tell FIG
+    to register the corresponding identity category for the citizen so the
+    gap is closed for every future institution."""
+    if 'identity' not in session:
+        return redirect('/')
+
+    category = request.form.get('category', '').strip()
+    full_name = request.form.get('full_name', '').strip()
+    f = request.files.get('document')
+    if not category or not f or not f.filename:
+        _flash('Please attach a file.', 'error')
+        return redirect('/')
+
+    # 1. Persist the file locally (any extension is allowed)
+    upload_dir = os.path.join(os.path.dirname(__file__), 'manual_kyc_uploads')
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = secure_filename(f.filename) or 'upload.bin'
+    stamped = f"{int(datetime.utcnow().timestamp())}_{session['identity']['national_id']}_{safe_name}"
+    full_path = os.path.join(upload_dir, stamped)
+    f.save(full_path)
+    size = os.path.getsize(full_path)
+
+    # 2. Tell FIG: the citizen has now satisfied this category via our manual KYC
+    proof_ref = f'manual_kyc_uploads/{stamped}'
+    try:
+        r = requests.post(
+            f'{FIG_GATEWAY_URL}/api/v1/identity/manual-register',
+            json={
+                'national_id': session['identity']['national_id'],
+                'category': category,
+                'manual_proof_ref': proof_ref,
+                'collected_by': INSTITUTION_NAME,
+                'holder_name': full_name,
+            },
+            headers={'X-API-Key': INSTITUTION_API_KEY},
+            timeout=10,
+        ).json()
+    except requests.RequestException as e:
+        _flash(f'File saved locally but FIG registration failed: {e}', 'error')
+        return redirect('/dashboard')
+
+    if not r.get('registered'):
+        _flash(f'FIG rejected the manual proof: {r.get("error", "unknown")}', 'error')
+        return redirect('/dashboard')
+
+    return render_template_string(
+        MANUAL_KYC_SUCCESS_PAGE,
+        name=INSTITUTION_NAME, sector=INSTITUTION_SECTOR,
+        category=category, filename=safe_name, size=size,
+        proof_ref=proof_ref, messages=[],
+    )
 
 
 @app.route('/logout')
