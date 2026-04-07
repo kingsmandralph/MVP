@@ -23,8 +23,17 @@ from datetime import datetime
 import requests
 from flask import Flask, render_template_string, request, redirect, session, flash, url_for
 
+from datetime import timedelta
+
 app = Flask(__name__)
 app.secret_key = 'demo-institution-secret-key'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+
+@app.before_request
+def _make_session_permanent():
+    session.permanent = True
 
 # ─── Configuration ─────────────────────────────────────────
 # In production, these come from the institution's config after
@@ -264,8 +273,13 @@ AUTHENTICATED_PAGE = BASE_CSS + """
     {% if verification_history %}
     <div class="card">
         <h3>Verification History</h3>
+        <p style="font-size:0.8rem;color:#718096;margin-bottom:0.75rem;">
+            Pending requests refresh automatically every time you reload this page.
+            Once the citizen grants consent in the FIG Portal, the data pulled
+            from the gateway appears here.
+        </p>
         <table>
-            <thead><tr><th>Request ID</th><th>Type</th><th>Status</th><th>Result</th></tr></thead>
+            <thead><tr><th>Request ID</th><th>Type</th><th>Status</th><th>Data Pulled from FIG</th></tr></thead>
             <tbody>
                 {% for v in verification_history %}
                 <tr>
@@ -276,11 +290,29 @@ AUTHENTICATED_PAGE = BASE_CSS + """
                         {% elif v.status == 'pending' %}<span class="badge" style="background:#fefcbf;color:#975a16">Pending Consent</span>
                         {% else %}<span class="badge badge-danger">{{ v.status }}</span>{% endif %}
                     </td>
-                    <td style="font-size:0.8rem">{{ v.result or 'Awaiting citizen consent' }}</td>
+                    <td style="font-size:0.78rem;">
+                        {% if v.status == 'pending' %}
+                            <em style="color:#975a16">Awaiting citizen consent...</em>
+                        {% elif v.result %}
+                            <table style="border:none;background:#f7fafc;">
+                                {% for k, val in v.result.items() %}
+                                <tr>
+                                    <td style="padding:0.25rem 0.5rem;border:none;color:#4a5568;font-weight:600;">{{ k }}</td>
+                                    <td style="padding:0.25rem 0.5rem;border:none;">{{ val }}</td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        {% else %}
+                            <em style="color:#9b2c2c">No data returned</em>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        <form method="GET" action="/dashboard" style="margin-top:0.75rem;">
+            <button type="submit" class="btn btn-outline">Refresh pending requests</button>
+        </form>
     </div>
     {% endif %}
 </div>
@@ -480,10 +512,38 @@ def check_verification():
                                   result=data)
 
 
+def _refresh_pending_history():
+    """Poll FIG for every verification that is still pending in our cache,
+    so that once the citizen grants consent the pulled data is reflected in
+    the bank dashboard without the user having to click anything."""
+    history = session.get('verification_history', [])
+    updated = False
+    for entry in history:
+        if entry.get('status') != 'pending':
+            continue
+        try:
+            r = requests.get(
+                f'{FIG_GATEWAY_URL}/api/v1/verify/{entry["id"]}',
+                headers={'X-API-Key': INSTITUTION_API_KEY},
+                timeout=5,
+            ).json()
+        except requests.RequestException:
+            continue
+        new_status = r.get('status', 'pending')
+        if new_status != 'pending':
+            entry['status'] = new_status
+            # Keep the result as a real dict so the template can show fields
+            entry['result'] = r.get('result') or {}
+            updated = True
+    if updated:
+        session['verification_history'] = history
+
+
 @app.route('/dashboard')
 def dashboard():
     if 'identity' not in session:
         return redirect('/')
+    _refresh_pending_history()
     messages = session.pop('_messages', [])
     return render_template_string(AUTHENTICATED_PAGE,
                                   name=INSTITUTION_NAME, sector=INSTITUTION_SECTOR,
@@ -523,7 +583,7 @@ def additional_verification():
             'id': data['request_id'],
             'type': verification_type,
             'status': data.get('status', 'pending'),
-            'result': json.dumps(data.get('result')) if data.get('result') else None
+            'result': data.get('result') or {}
         }
         history.append(entry)
         session['verification_history'] = history

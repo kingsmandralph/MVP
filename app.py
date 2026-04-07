@@ -24,8 +24,18 @@ from models import (
 
 app = Flask(__name__)
 app.config.from_object(Config)
+# Make all sessions (admin + citizen) persist across reloads. Without this,
+# Flask falls back to a browser-session cookie which some browsers drop on
+# refresh, silently logging the citizen out.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 db.init_app(app)
+
+
+@app.before_request
+def _make_session_permanent():
+    session.permanent = True
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
