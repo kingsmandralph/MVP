@@ -402,7 +402,7 @@ templates/
 | Portal | Username/ID | Password |
 |--------|-------------|----------|
 | Admin Dashboard | `admin` | `admin123` |
-| Citizen Portal — Ada (complete identity) | `NID-2026-001` | `demo1234` |
+| Citizen Portal — Ada (complete identity) | `NID-2026-009` | `demo1234` |
 | Citizen Portal — Bola (missing health record) | `NID-2026-002` | `demo1234` |
 
 Demo data is seeded on first run:
